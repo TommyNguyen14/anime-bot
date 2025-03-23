@@ -19,6 +19,7 @@ class CharacterGuess(commands.Cog):
         self.active_games = {}
         self._locks = {}
         self.END_GAME = "❌"
+        self.PLAY_AGAIN = "🔄"
         self.EMBED_COLOR = Config.DEFAULT_COLOR
         print("CharacterGuess cog initialized!")
 
@@ -27,8 +28,8 @@ class CharacterGuess(commands.Cog):
         """Start a new character guessing game"""
         await self.start_new_game(ctx, difficulty)
 
-    @commands.command(name="c_end", aliases=["c end"])
-    async def char_end(self, ctx):
+    @commands.command(aliases=["c end"])
+    async def c_end(self, ctx):
         """End the current character guessing game"""
         channel_id = ctx.channel.id
         if channel_id not in self.active_games:
@@ -146,22 +147,25 @@ class CharacterGuess(commands.Cog):
                     if char['anime_data'].get('english_title'):
                         anime_title += f" ({char['anime_data']['english_title']})"
 
-                    embed.add_field(
-                        name="Character Information",
-                        value=f"Name: {char['name']}\nAnime: {anime_title}",
-                        inline=False
+                    # Format the character result
+                    result_text = (
+                        f"Character: {char['name']} {'✅' if game.get('solved', False) else '❌'}\n"
+                        f"Anime: {anime_title}\n"
+                        f"Difficulty: {char['difficulty']}\n"
+                        f"Guesses Made: {game['guesses']}"
                     )
                     
-                    embed.add_field(
-                        name="Game Statistics",
-                        value=f"Total Guesses: {game['guesses']}",
-                        inline=False
-                    )
+                    embed.description = result_text
                     
                     if char.get('image_url'):
                         embed.set_image(url=char['image_url'])
                     
-                    await ctx.send(embed=embed)
+                    embed.set_footer(text="Click 🔄 to play again!")
+                    
+                    # Send summary and add play again reaction
+                    summary_msg = await ctx.send(embed=embed)
+                    await summary_msg.add_reaction(self.PLAY_AGAIN)
+                    game['summary_message'] = summary_msg
 
                 # Clean up
                 if 'message' in game:
@@ -203,6 +207,7 @@ class CharacterGuess(commands.Cog):
         
         if guess == correct_name:
             await message.add_reaction('✅')
+            game['solved'] = True
             
             # Send victory message
             embed = discord.Embed(
@@ -215,16 +220,12 @@ class CharacterGuess(commands.Cog):
                 value=str(game['guesses']),
                 inline=True
             )
-            await message.channel.send(embed=embed)
+            victory_msg = await message.channel.send(embed=embed)
             
-            # Start new character
-            char = await self.get_character()
-            if char:
-                game['character'] = char
-                game['guesses'] = 0
-                new_embed = await self.create_character_embed(char)
-                game['message'] = await message.channel.send(embed=new_embed)
-                await game['message'].add_reaction(self.END_GAME)
+            # Add reactions for end game or continue
+            await victory_msg.add_reaction(self.END_GAME)
+            await victory_msg.add_reaction(self.PLAY_AGAIN)
+            game['victory_message'] = victory_msg
         else:
             await message.add_reaction('❌')
 
@@ -235,13 +236,21 @@ class CharacterGuess(commands.Cog):
             return
 
         channel_id = reaction.message.channel.id
+        
+        # Handle play again reaction
+        if str(reaction.emoji) == self.PLAY_AGAIN:
+            # Start new game for the user
+            ctx = await self.bot.get_context(reaction.message)
+            if channel_id not in self.active_games:  # Only start if no active game
+                await self.start_new_game(ctx)
+            return
+
         if channel_id not in self.active_games:
             return
 
         game = self.active_games[channel_id]
-        if reaction.message.id != game['message'].id:
-            return
-
+        
+        # Handle end game reaction
         if str(reaction.emoji) == self.END_GAME:
             if user.id == game['started_by'] or user.guild_permissions.manage_messages:
                 ctx = await self.bot.get_context(reaction.message)
