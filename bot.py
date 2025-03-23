@@ -41,20 +41,26 @@ class AnimeBot(commands.Bot):
             await self.load_extension('cogs.character_guess')
             print("Extensions loaded!")
             
-            # Sync commands
-            print("Syncing commands...")
-            await self.tree.sync()
-            print("Commands synced!")
-            
         except Exception as e:
             print(f"Error during setup: {str(e)}")
 
     async def on_ready(self):
         """Called when the bot is ready"""
         print(f"Logged in as {self.user}")
+        
+        # Sync commands after bot is ready
+        print("Syncing commands...")
+        try:
+            await self.tree.sync()
+            print("Commands synced!")
+        except Exception as e:
+            print(f"Error syncing commands: {e}")
+        
+        # Set bot status
         await self.change_presence(
             activity=discord.Game(name="anime.ahhhh | ;help")
         )
+        print("Bot is ready!")
 
     async def on_command_error(self, ctx, error):
         """Handle command errors"""
@@ -89,10 +95,9 @@ class AnimeBot(commands.Bot):
         except Exception as e:
             print(f"Error loading extensions: {e}")
 
-if __name__ == "__main__":
+def run_bot():
     bot = AnimeBot()
-    try:
-        print("Starting bot...")
-        bot.run(TOKEN)
-    except Exception as e:
-        print(f"Error running bot: {str(e)}") 
+    bot.run(TOKEN)
+
+if __name__ == "__main__":
+    run_bot() 

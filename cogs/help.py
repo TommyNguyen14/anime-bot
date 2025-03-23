@@ -39,33 +39,60 @@ class Help(commands.Cog):
         self._locks = {}
         self.EMBED_COLOR = Config.DEFAULT_COLOR
 
-    @commands.hybrid_command(name="help")
-    async def help(self, ctx):
-        """Show help information"""
-        await self.show_help(ctx)
-
     async def show_help(self, ctx):
         embed = discord.Embed(
-            title=Config.HELP_TITLE,
-            description=Config.HELP_DESCRIPTION,
+            title="Character Guessing Game",
+            description="Test your anime knowledge by guessing characters!",
             color=self.EMBED_COLOR
         )
         
+        # Commands section
+        commands_text = (
+            "`c` - Start a new character guessing game\n"
+            "`c end` - End the current game\n"
+            "`clist <anime>` - List characters from an anime"
+        )
         embed.add_field(
-            name="📝 Commands",
-            value=Config.get_commands_help(),
+            name="Commands",
+            value=commands_text,
             inline=False
         )
         
+        # How to Play section
+        gameplay_text = (
+            "1. Start a game using `;c`\n"
+            "2. Type the character's name to make a guess\n"
+            "3. Use 🔄 to skip/start new game at any time\n"
+            "4. Use ❌ to end game and see summary\n"
+            "5. All commands use the `;` prefix"
+        )
         embed.add_field(
-            name="🎯 How to Play",
-            value=Config.get_gameplay_help(),
+            name="How to Play",
+            value=gameplay_text,
+            inline=False
+        )
+
+        # Additional Info section
+        info_text = (
+            "• Characters are from various anime series\n"
+            "• Correct guesses are marked with ✅\n"
+            "• Wrong guesses are marked with ❌\n"
+            "• Game summary shows all characters attempted"
+        )
+        embed.add_field(
+            name="Additional Info",
+            value=info_text,
             inline=False
         )
 
         embed.set_footer(text=f"Prefix: {Config.PREFIX}")
         
         await ctx.send(embed=embed)
+
+    @commands.command(name="help")
+    async def help(self, ctx):
+        """Show help information"""
+        await self.show_help(ctx)
 
     @commands.command()
     async def ping(self, ctx):
