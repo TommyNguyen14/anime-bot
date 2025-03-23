@@ -61,17 +61,22 @@ class CharacterGuess(commands.Cog):
             print(f"Error getting character: {e}")
             return None
 
-    async def create_character_embed(self, character, guesses=0):
-        """Create the character embed"""
+    async def create_character_embed(self, game_data):
+        """Create the character embed with game state"""
+        char = game_data['character']
         embed = discord.Embed(
             title="Character Guessing Game",
-            description="Type the character's name to make a guess!\nUse `;c end` to end the game.",
             color=self.EMBED_COLOR
         )
         
-        anime_title = character['anime_data']['title']
-        if character['anime_data'].get('english_title'):
-            anime_title += f" ({character['anime_data']['english_title']})"
+        # Game status
+        status = "Game Over!" if game_data.get('ended', False) else "Guess the character!"
+        embed.description = f"**Status:** {status}\n**Guesses:** {game_data['guesses']}"
+        
+        # Current character info
+        anime_title = char['anime_data']['title']
+        if char['anime_data'].get('english_title'):
+            anime_title += f" ({char['anime_data']['english_title']})"
             
         embed.add_field(
             name="Anime Title",
@@ -81,20 +86,30 @@ class CharacterGuess(commands.Cog):
         
         embed.add_field(
             name="Difficulty",
-            value=character['difficulty'],
+            value=char['difficulty'],
             inline=True
         )
         
-        embed.add_field(
-            name="Guesses",
-            value=str(guesses),
-            inline=True
-        )
-        
-        if character.get('image_url'):
-            embed.set_image(url=character['image_url'])
+        # Add character history if any
+        if game_data.get('history', []):
+            history_text = ""
+            for past_char in game_data['history']:
+                result = '✅' if past_char.get('solved', False) else '❌'
+                history_text += f"\n{past_char['name']} ({past_char['anime_data']['title']}) {result}"
             
-        embed.set_footer(text="Click ❌ or type ;c end to end the game")
+            embed.add_field(
+                name="Previous Characters",
+                value=history_text.strip() or "None",
+                inline=False
+            )
+        
+        if char.get('image_url'):
+            embed.set_image(url=char['image_url'])
+        
+        if game_data.get('ended', False):
+            embed.set_footer(text="Game Over! Click 🔄 to play again")
+        else:
+            embed.set_footer(text="Type character name to guess | Click ❌ to end")
         
         return embed
 
@@ -112,16 +127,20 @@ class CharacterGuess(commands.Cog):
                 await ctx.send("No characters available!")
                 return
 
-            embed = await self.create_character_embed(char)
+            game_data = {
+                'character': char,
+                'started_by': ctx.author.id,
+                'guesses': 0,
+                'history': [],
+                'ended': False
+            }
+
+            embed = await self.create_character_embed(game_data)
             msg = await ctx.send(embed=embed)
             await msg.add_reaction(self.END_GAME)
 
-            self.active_games[channel_id] = {
-                'character': char,
-                'message': msg,
-                'started_by': ctx.author.id,
-                'guesses': 0
-            }
+            game_data['message'] = msg
+            self.active_games[channel_id] = game_data
 
         except Exception as e:
             print(f"Error starting game: {e}")
@@ -135,44 +154,17 @@ class CharacterGuess(commands.Cog):
         try:
             if channel_id in self.active_games:
                 game = self.active_games[channel_id]
+                game['ended'] = True
                 
-                if show_summary:
-                    embed = discord.Embed(
-                        title="Game Summary",
-                        color=self.EMBED_COLOR
-                    )
-                    
-                    char = game['character']
-                    anime_title = char['anime_data']['title']
-                    if char['anime_data'].get('english_title'):
-                        anime_title += f" ({char['anime_data']['english_title']})"
-
-                    # Format the character result
-                    result_text = (
-                        f"Character: {char['name']} {'✅' if game.get('solved', False) else '❌'}\n"
-                        f"Anime: {anime_title}\n"
-                        f"Difficulty: {char['difficulty']}\n"
-                        f"Guesses Made: {game['guesses']}"
-                    )
-                    
-                    embed.description = result_text
-                    
-                    if char.get('image_url'):
-                        embed.set_image(url=char['image_url'])
-                    
-                    embed.set_footer(text="Click 🔄 to play again!")
-                    
-                    # Send summary and add play again reaction
-                    summary_msg = await ctx.send(embed=embed)
-                    await summary_msg.add_reaction(self.PLAY_AGAIN)
-                    game['summary_message'] = summary_msg
-
-                # Clean up
-                if 'message' in game:
-                    try:
-                        await game['message'].clear_reactions()
-                    except:
-                        pass
+                # Update embed with final state
+                embed = await self.create_character_embed(game)
+                await game['message'].edit(embed=embed)
+                
+                # Clear old reactions and add play again
+                await game['message'].clear_reactions()
+                await game['message'].add_reaction(self.PLAY_AGAIN)
+                
+                # Remove from active games
                 del self.active_games[channel_id]
                 
         except Exception as e:
@@ -190,6 +182,9 @@ class CharacterGuess(commands.Cog):
             return
             
         game = self.active_games[channel_id]
+        if game.get('ended', False):
+            return
+            
         current_char = game['character']
         
         # Check if the message is a guess
@@ -198,35 +193,35 @@ class CharacterGuess(commands.Cog):
         
         game['guesses'] += 1
         
-        # Update embed with new guess count
-        try:
-            new_embed = await self.create_character_embed(current_char, game['guesses'])
-            await game['message'].edit(embed=new_embed)
-        except:
-            pass
-        
         if guess == correct_name:
-            await message.add_reaction('✅')
-            game['solved'] = True
+            # Mark current character as solved
+            current_char['solved'] = True
             
-            # Send victory message
-            embed = discord.Embed(
-                title="Correct!",
-                description=f"You guessed it! The character was {current_char['name']}",
-                color=self.EMBED_COLOR
-            )
-            embed.add_field(
-                name="Guesses",
-                value=str(game['guesses']),
-                inline=True
-            )
-            victory_msg = await message.channel.send(embed=embed)
+            # Add to history
+            game['history'].append({
+                'name': current_char['name'],
+                'anime_data': current_char['anime_data'],
+                'solved': True
+            })
             
-            # Add reactions for end game or continue
-            await victory_msg.add_reaction(self.END_GAME)
-            await victory_msg.add_reaction(self.PLAY_AGAIN)
-            game['victory_message'] = victory_msg
+            # Get new character
+            try:
+                new_char = await self.get_character()
+                if new_char:
+                    game['character'] = new_char
+                    game['guesses'] = 0
+                    
+                    # Update embed
+                    embed = await self.create_character_embed(game)
+                    await game['message'].edit(embed=embed)
+                    await message.add_reaction('✅')
+            except Exception as e:
+                print(f"Error getting new character: {e}")
+                await self.end_game(await self.bot.get_context(message))
         else:
+            # Update embed with new guess count
+            embed = await self.create_character_embed(game)
+            await game['message'].edit(embed=embed)
             await message.add_reaction('❌')
 
     @commands.Cog.listener()
@@ -239,7 +234,6 @@ class CharacterGuess(commands.Cog):
         
         # Handle play again reaction
         if str(reaction.emoji) == self.PLAY_AGAIN:
-            # Start new game for the user
             ctx = await self.bot.get_context(reaction.message)
             if channel_id not in self.active_games:  # Only start if no active game
                 await self.start_new_game(ctx)
@@ -254,6 +248,13 @@ class CharacterGuess(commands.Cog):
         if str(reaction.emoji) == self.END_GAME:
             if user.id == game['started_by'] or user.guild_permissions.manage_messages:
                 ctx = await self.bot.get_context(reaction.message)
+                # Add current character to history if not solved
+                if not game['character'].get('solved', False):
+                    game['history'].append({
+                        'name': game['character']['name'],
+                        'anime_data': game['character']['anime_data'],
+                        'solved': False
+                    })
                 await self.end_game(ctx, show_summary=True)
 
 async def setup(bot):
